@@ -35,6 +35,11 @@
           "default": "white",
           "description": "Border color of the gradient preview box"
         },
+        "mini-gradient-preview.boxShadow": {
+          "type": "string",
+          "default": "0 0 2px 1px rgba(0, 0, 0, 0.5)",
+          "description": "Box shadow surrounding the gradient preview box"
+        },
         "mini-gradient-preview.fileTypes": {
           "type": "array",
           "items": {

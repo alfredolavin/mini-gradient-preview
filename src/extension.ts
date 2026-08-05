@@ -10,12 +10,12 @@ const noDecorationType: vscode.TextEditorDecorationType = vscode.window.createTe
 const GRADIENT_REGEX = /(?:linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient|repeating-conic-gradient)\(/i;
 
 /**
- * Returns dynamic decoration based on font size, preview size, and border color.
+ * Returns dynamic decoration based on font size, preview size, and box shadow.
  */
 export function getDecoration(gradientValue: string): vscode.DecorationInstanceRenderOptions {
   const config = vscode.workspace.getConfiguration(WORKSPACE_SECTION);
   const sizeSetting = config.get<number>('size', 40);
-  const borderColor = config.get<string>('borderColor', 'white');
+  const boxShadow = config.get<string>('boxShadow', '0 0 2px 1px rgba(0, 0, 0, 0.5)');
 
   const editorConfig = vscode.workspace.getConfiguration('editor');
   const fontSize = parseFloat(editorConfig.get('fontSize') as string) || 14;
@@ -23,15 +23,18 @@ export function getDecoration(gradientValue: string): vscode.DecorationInstanceR
   const width: number = sizeSetting * (fontSize / 14);
   const bottom: number = 4 * (fontSize / 14);
 
+  const beforeOptions: any = {
+    contentText: "",
+    height: "90%",
+    width: `${width}px`,
+    margin: `0px 4px -${bottom}px 1px`,
+    backgroundColor: `transparent; background-image: ${gradientValue}; box-shadow: ${boxShadow};`,
+    border: "none",
+    boxShadow: boxShadow
+  };
+
   return {
-    before: {
-      contentText: "",
-      height: "90%",
-      width: `${width}px`,
-      margin: `0px 4px -${bottom}px 1px`,
-      backgroundColor: `background-color: transparent; background-image: ${gradientValue};`,
-      border: `1px solid ${borderColor}`
-    }
+    before: beforeOptions
   };
 }
 
@@ -68,11 +71,14 @@ export function isHtmlDocument(document: vscode.TextDocument): boolean {
 /**
  * Collects CSS variable declarations (--var-name: value) from open workspace text documents.
  */
-export function collectCssVariables(): Map<string, string> {
+export function collectCssVariables(
+  documents: readonly vscode.TextDocument[] = vscode.workspace.textDocuments
+): Map<string, string> {
   const varMap = new Map<string, string>();
   const varRegex = /--([a-zA-Z0-9_-]+)\s*:\s*([^;}\n]+)/g;
 
-  for (const doc of vscode.workspace.textDocuments) {
+  for (const doc of documents) {
+    varRegex.lastIndex = 0;
     const text = doc.getText();
     let match: RegExpExecArray | null;
     while ((match = varRegex.exec(text)) !== null) {
@@ -138,17 +144,21 @@ export function extractGradientAt(text: string, startOffset: number): { fullGrad
  * Maps CSS class names (.class-name { ... }) to gradient strings by checking any property declaration
  * (e.g. background, background-image, --variable, or custom properties) that resolves to a gradient.
  */
-export function collectClassToGradientMap(varMap: Map<string, string>): Map<string, string> {
+export function collectClassToGradientMap(
+  varMap: Map<string, string>,
+  documents: readonly vscode.TextDocument[] = vscode.workspace.textDocuments
+): Map<string, string> {
   const classMap = new Map<string, string>();
   const classRuleRegex = /\.([a-zA-Z_][a-zA-Z0-9_-]*)\s*\{([^}]+)\}/g;
-  const propRegex = /(?:[a-zA-Z0-9_-]+)\s*:\s*([^;}\n]+)/g;
 
-  for (const doc of vscode.workspace.textDocuments) {
+  for (const doc of documents) {
+    classRuleRegex.lastIndex = 0;
     const text = doc.getText();
     let match: RegExpExecArray | null;
     while ((match = classRuleRegex.exec(text)) !== null) {
       const className = match[1];
       const body = match[2];
+      const propRegex = /(?:[a-zA-Z0-9_-]+)\s*:\s*([^;}\n]+)/g;
       let pMatch: RegExpExecArray | null;
       while ((pMatch = propRegex.exec(body)) !== null) {
         const rawValue = pMatch[1].trim();
@@ -157,6 +167,22 @@ export function collectClassToGradientMap(varMap: Map<string, string>): Map<stri
         if (gradMatch) {
           const gradExtract = extractGradientAt(resolvedValue, gradMatch.index);
           if (gradExtract) {
+            if (rawValue.includes('var')) {
+              let hasCommentBeforeVar = false;
+              let vIdx = -1;
+              while ((vIdx = rawValue.indexOf('var', vIdx + 1)) !== -1) {
+                const beforeVar = rawValue.substring(0, vIdx);
+                if (/\/\*/.test(beforeVar)) {
+                  hasCommentBeforeVar = true;
+                  break;
+                }
+              }
+              if (hasCommentBeforeVar) {
+                classMap.delete(className);
+                break;
+              }
+            }
+
             classMap.set(className, gradExtract.fullGradient);
             break;
           }
@@ -204,6 +230,11 @@ function decorateCssDocument(
   while ((match = varUsageRegex.exec(text)) !== null) {
     const startPos = match.index;
     const rawVar = match[0];
+    const lineStart = Math.max(text.lastIndexOf(':', startPos), text.lastIndexOf(';', startPos), text.lastIndexOf('{', startPos), 0);
+    const prefix = text.substring(lineStart, startPos);
+    if (/\/\*/.test(prefix)) {
+      continue;
+    }
     const resolved = resolveVariableString(rawVar, varMap);
     if (GRADIENT_REGEX.test(resolved) && rawVar !== resolved) {
       const pos = document.positionAt(startPos);
@@ -302,6 +333,11 @@ function decorateHtmlDocument(
       let vMatch: RegExpExecArray | null;
       while ((vMatch = varUsageRegex.exec(attrVal)) !== null) {
         const startPos = valStartOffset + vMatch.index;
+        const lineStart = Math.max(attrVal.lastIndexOf(':', vMatch.index), attrVal.lastIndexOf(';', vMatch.index), 0);
+        const prefix = attrVal.substring(lineStart, vMatch.index);
+        if (/\/\*/.test(prefix)) {
+          continue;
+        }
         const rawVar = vMatch[0];
         const resolved = resolveVariableString(rawVar, varMap);
         if (GRADIENT_REGEX.test(resolved)) {

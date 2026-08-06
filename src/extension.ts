@@ -16,6 +16,7 @@ export function getDecoration(gradientValue: string): vscode.DecorationInstanceR
   const config = vscode.workspace.getConfiguration(WORKSPACE_SECTION);
   const sizeSetting = config.get<number>('size', 40);
   const boxShadow = config.get<string>('boxShadow', '0 0 2px 1px rgba(0, 0, 0, 0.5)');
+  const borderRadius = config.get<string>('borderRadius', '33%');
 
   const editorConfig = vscode.workspace.getConfiguration('editor');
   const fontSize = parseFloat(editorConfig.get('fontSize') as string) || 14;
@@ -28,9 +29,10 @@ export function getDecoration(gradientValue: string): vscode.DecorationInstanceR
     height: "90%",
     width: `${width}px`,
     margin: `0px 4px -${bottom}px 1px`,
-    backgroundColor: `transparent; background-image: ${gradientValue}; box-shadow: ${boxShadow};`,
+    backgroundColor: `transparent; background-image: ${gradientValue}; box-shadow: ${boxShadow}; border-radius: ${borderRadius};`,
     border: "none",
-    boxShadow: boxShadow
+    boxShadow: boxShadow,
+    borderRadius: borderRadius
   };
 
   return {

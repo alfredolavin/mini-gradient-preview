@@ -40,6 +40,11 @@
           "default": "0 0 2px 1px rgba(0, 0, 0, 0.5)",
           "description": "Box shadow surrounding the gradient preview box"
         },
+        "mini-gradient-preview.borderRadius": {
+          "type": "string",
+          "default": "33%",
+          "description": "Border radius of the gradient preview box"
+        },
         "mini-gradient-preview.fileTypes": {
           "type": "array",
           "items": {

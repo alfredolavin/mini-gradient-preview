@@ -10,6 +10,36 @@ const noDecorationType: vscode.TextEditorDecorationType = vscode.window.createTe
 const GRADIENT_REGEX = /(?:linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient|repeating-conic-gradient)\(/i;
 
 /**
+ * Builds an array of [start, end] offset pairs for every /* ... *\/ block in text.
+ */
+export function buildCommentRanges(text: string): [number, number][] {
+  const ranges: [number, number][] = [];
+  let i = 0;
+  while (i < text.length - 1) {
+    if (text[i] === '/' && text[i + 1] === '*') {
+      const start = i;
+      const end = text.indexOf('*/', i + 2);
+      if (end === -1) {
+        ranges.push([start, text.length]);
+        break;
+      }
+      ranges.push([start, end + 2]);
+      i = end + 2;
+    } else {
+      i++;
+    }
+  }
+  return ranges;
+}
+
+/**
+ * Returns true if the given offset falls inside any comment range.
+ */
+export function isInComment(offset: number, commentRanges: [number, number][]): boolean {
+  return commentRanges.some(([s, e]) => offset >= s && offset < e);
+}
+
+/**
  * Returns dynamic decoration based on font size, preview size, and box shadow.
  */
 export function getDecoration(gradientValue: string): vscode.DecorationInstanceRenderOptions {
@@ -160,31 +190,18 @@ export function collectClassToGradientMap(
     while ((match = classRuleRegex.exec(text)) !== null) {
       const className = match[1];
       const body = match[2];
+      // Strip /* ... */ comments from the property body before matching,
+      // so any gradient or var() hidden inside a comment is ignored.
+      const strippedBody = body.replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length));
       const propRegex = /(?:[a-zA-Z0-9_-]+)\s*:\s*([^;}\n]+)/g;
       let pMatch: RegExpExecArray | null;
-      while ((pMatch = propRegex.exec(body)) !== null) {
+      while ((pMatch = propRegex.exec(strippedBody)) !== null) {
         const rawValue = pMatch[1].trim();
         const resolvedValue = resolveVariableString(rawValue, varMap);
         const gradMatch = GRADIENT_REGEX.exec(resolvedValue);
         if (gradMatch) {
           const gradExtract = extractGradientAt(resolvedValue, gradMatch.index);
           if (gradExtract) {
-            if (rawValue.includes('var')) {
-              let hasCommentBeforeVar = false;
-              let vIdx = -1;
-              while ((vIdx = rawValue.indexOf('var', vIdx + 1)) !== -1) {
-                const beforeVar = rawValue.substring(0, vIdx);
-                if (/\/\*/.test(beforeVar)) {
-                  hasCommentBeforeVar = true;
-                  break;
-                }
-              }
-              if (hasCommentBeforeVar) {
-                classMap.delete(className);
-                break;
-              }
-            }
-
             classMap.set(className, gradExtract.fullGradient);
             break;
           }
@@ -207,11 +224,15 @@ function decorateCssDocument(
 ) {
   const document = editor.document;
   const text = document.getText();
+  const commentRanges = buildCommentRanges(text);
   const gradientGlobalRegex = /(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient|repeating-conic-gradient)\(/g;
 
   let match: RegExpExecArray | null;
   while ((match = gradientGlobalRegex.exec(text)) !== null) {
     const startPos = match.index;
+    if (isInComment(startPos, commentRanges)) {
+      continue;
+    }
     const extracted = extractGradientAt(text, startPos);
     if (extracted) {
       const resolvedGrad = resolveVariableString(extracted.fullGradient, varMap);
@@ -231,12 +252,10 @@ function decorateCssDocument(
   const varUsageRegex = /var\(\s*--[a-zA-Z0-9_-]+(?:\s*,\s*[^)]+)?\s*\)/g;
   while ((match = varUsageRegex.exec(text)) !== null) {
     const startPos = match.index;
-    const rawVar = match[0];
-    const lineStart = Math.max(text.lastIndexOf(':', startPos), text.lastIndexOf(';', startPos), text.lastIndexOf('{', startPos), 0);
-    const prefix = text.substring(lineStart, startPos);
-    if (/\/\*/.test(prefix)) {
+    if (isInComment(startPos, commentRanges)) {
       continue;
     }
+    const rawVar = match[0];
     const resolved = resolveVariableString(rawVar, varMap);
     if (GRADIENT_REGEX.test(resolved) && rawVar !== resolved) {
       const pos = document.positionAt(startPos);
@@ -271,10 +290,14 @@ function decorateHtmlDocument(
   while ((styleMatch = styleBlockRegex.exec(text)) !== null) {
     const styleContent = styleMatch[1];
     const blockStartOffset = styleMatch.index + styleMatch[0].indexOf(styleContent);
+    const styleCommentRanges = buildCommentRanges(styleContent);
 
     const gradientGlobalRegex = /(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient|repeating-conic-gradient)\(/g;
     let gMatch: RegExpExecArray | null;
     while ((gMatch = gradientGlobalRegex.exec(styleContent)) !== null) {
+      if (isInComment(gMatch.index, styleCommentRanges)) {
+        continue;
+      }
       const startPos = blockStartOffset + gMatch.index;
       const extracted = extractGradientAt(text, startPos);
       if (extracted) {

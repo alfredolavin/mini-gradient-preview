@@ -102,11 +102,13 @@ export function isHtmlDocument(document: vscode.TextDocument): boolean {
 
 /**
  * Collects CSS variable declarations (--var-name: value) from open workspace text documents.
+ * Also returns a count map of how many times each variable is defined.
  */
 export function collectCssVariables(
   documents: readonly vscode.TextDocument[] = vscode.workspace.textDocuments
-): Map<string, string> {
+): { varMap: Map<string, string>; varCountMap: Map<string, number> } {
   const varMap = new Map<string, string>();
+  const varCountMap = new Map<string, number>();
   const varRegex = /--([a-zA-Z0-9_-]+)\s*:\s*([^;}\n]+)/g;
 
   for (const doc of documents) {
@@ -117,10 +119,11 @@ export function collectCssVariables(
       const varName = `--${match[1]}`;
       const varValue = match[2].trim();
       varMap.set(varName, varValue);
+      varCountMap.set(varName, (varCountMap.get(varName) ?? 0) + 1);
     }
   }
 
-  return varMap;
+  return { varMap, varCountMap };
 }
 
 /**
@@ -178,6 +181,7 @@ export function extractGradientAt(text: string, startOffset: number): { fullGrad
  */
 export function collectClassToGradientMap(
   varMap: Map<string, string>,
+  varCountMap: Map<string, number>,
   documents: readonly vscode.TextDocument[] = vscode.workspace.textDocuments
 ): Map<string, string> {
   const classMap = new Map<string, string>();
@@ -202,6 +206,16 @@ export function collectClassToGradientMap(
         if (gradMatch) {
           const gradExtract = extractGradientAt(resolvedValue, gradMatch.index);
           if (gradExtract) {
+            // If the value references a var(), check that the variable is
+            // defined only once. Multiple definitions mean the actual gradient
+            // is context-dependent — suppress the preview to avoid confusion.
+            if (rawValue.includes('var(')) {
+              const referencedVars = [...rawValue.matchAll(/var\(\s*(--[a-zA-Z0-9_-]+)/g)].map(m => m[1]);
+              const isAmbiguous = referencedVars.some(v => (varCountMap.get(v) ?? 0) > 1);
+              if (isAmbiguous) {
+                break;
+              }
+            }
             classMap.set(className, gradExtract.fullGradient);
             break;
           }
@@ -538,8 +552,8 @@ function decorate(editor: vscode.TextEditor) {
     return;
   }
 
-  const varMap = collectCssVariables();
-  const classMap = collectClassToGradientMap(varMap);
+  const { varMap, varCountMap } = collectCssVariables();
+  const classMap = collectClassToGradientMap(varMap, varCountMap);
   const decorations: vscode.DecorationOptions[] = [];
   const addedOffsets = new Set<number>();
 

@@ -42,8 +42,8 @@ suite('Extension Test Suite', () => {
       getText: () => cssText
     } as any;
 
-    const varMap = myExtension.collectCssVariables([mockDoc]);
-    const classMap = myExtension.collectClassToGradientMap(varMap, [mockDoc]);
+    const { varMap, varCountMap } = myExtension.collectCssVariables([mockDoc]);
+    const classMap = myExtension.collectClassToGradientMap(varMap, varCountMap, [mockDoc]);
 
     assert.strictEqual(classMap.has('cherry-blossom'), true);
     assert.strictEqual(classMap.has('cyber-blue'), true);
@@ -71,8 +71,8 @@ suite('Extension Test Suite', () => {
       getText: () => cssText
     } as any;
 
-    const varMap = myExtension.collectCssVariables([mockDoc]);
-    const classMap = myExtension.collectClassToGradientMap(varMap, [mockDoc]);
+    const { varMap, varCountMap } = myExtension.collectCssVariables([mockDoc]);
+    const classMap = myExtension.collectClassToGradientMap(varMap, varCountMap, [mockDoc]);
 
     assert.strictEqual(classMap.has('class-with-comment-before'), false, 'Should disable preview when comment is before var');
     assert.strictEqual(classMap.has('class-without-comment'), true, 'Should enable preview when no comment is present');
